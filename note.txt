@@ -1,0 +1,239 @@
+1、搜索、
+	搜索其实还是查询----模糊查询
+	db.collection.find({nickname: /王/})
+	sql.find(database, collection, { nickname: eval('/' + nickname + '/')})
+
+	<div class="input-group pull-left" style="width: 200px;margin-left: 15px;">
+		<div class="input-group-addon">
+			<span class=" glyphicon glyphicon-search"></span>
+		</div>
+		<input type="text" class="form-control" id="searchTxt" placeholder="输入您的昵称搜索" onchange="searchFn()">
+	</div>
+
+	 function searchFn () {
+    var val = $('#searchTxt').val()
+    window.location.href = '/users/search?nickname=' + val;
+  }
+
+	router.get('/search', (req, res, next) => {
+	const { nickname } = req.query;
+	sql.find('sh1811', 'users', { nickname: eval('/'+nickname+'/') }).then(data => {
+			res.render('users', {
+				activeIndex: 2,
+				totalNumber: 1,
+				pageCode: 1,
+				data,
+				pageNumber: data.length
+			})
+	})
+})
+
+分类、
+	router.get('/distinct', (req, res, next) => {
+		sql.distinct('sh1811', 'users', 'age').then(ageArr => {
+			res.send(ageArr)
+		})
+	})   ---- 测试   --- tool/sql.js 添加了distinct方法
+	实际应用在了/users 和 /users/search 这两个路由里
+	router.get('/', function(req, res, next) {
+	let { pageCode, pageNumber } = req.query;
+	pageCode = pageCode * 1 || 1; // 默认是第一页
+	pageNumber = pageNumber * 1 || 8; // 默认每页显示8条数据
+	sql.find('sh1811', 'users', {}).then(data => {
+		const totalNumber = Math.ceil(data.length / pageNumber);
+		data = data.splice((pageCode -  1) * pageNumber, pageNumber)
+		sql.distinct('sh1811', 'users', 'age').then(ageArr => { // -----就是在这
+			res.render('users', { 
+				activeIndex: 2,
+				totalNumber,
+				pageNumber,
+				pageCode,
+				data, 
+				ageArr  // -----就是在这
+			});
+		})
+		
+	}).catch(err => {
+		console.log(err)
+	})
+});
+router.get('/search', (req, res, next) => {
+	const { nickname } = req.query;
+	sql.find('sh1811', 'users', { nickname: eval('/'+nickname+'/') }).then(data => {
+		// res.send(data)
+		sql.distinct('sh1811', 'users', 'age').then(ageArr => {   // -----就是在这
+			res.render('users', {
+				activeIndex: 2,
+				totalNumber: 1,
+				pageCode: 1,
+				data,
+				pageNumber: data.length,
+				ageArr   // -----就是在这
+			})
+		})
+		
+	})
+})
+排序，
+ tool/sql.js 添加了排序的方法
+
+ <a href="/users/sort?type=age&num=1">年龄升序</a>
+	<a href="/users/sort?type=age&num=-1">年龄降序</a>
+
+ router.get('/sort', (req, res, next) => {
+	let { type, num } = req.query;
+	let sortData = {};      // ----------------------
+	sortData[type] = num * 1; // -----------------------
+	sql.sort('sh1811', 'users', sortData).then(data => {
+		// res.send(data)
+		sql.distinct('sh1811', 'users', 'age').then(ageArr => {
+			res.render('users', {
+				activeIndex: 2,
+				totalNumber: 1,
+				pageCode: 1,
+				data,
+				pageNumber: data.length,
+				ageArr
+			})
+		})
+		
+	})
+})
+
+
+登录
+后台管理系统必须得先登录
+1、AdminLTE-2.3.7/pages/examples/login.html
+复制到views/login.ejs，一定要修改路径
+2、修改登录的表单，删除不必要的元素，确定表单提交地址为 /loginAction
+3、routes/index.js,添加路由 /login，指向login.ejs页面
+	router.get('/login', function(req, res, next) {
+		res.render('login');
+	});
+4、实现提交表单的路由/loginAction
+	4.1 数据库内部必须得有一个管理员集合,并且插入数据 admin 123456
+		db.createCollection('admin')
+		db.admin.insert({"username": "admin", "password": "e10adc3949ba59abbe56e057f20f883e"})
+	4.2 实现登录的路由/loginAction
+			res.cookie('isLogin', 1); 可以从后端中給前端页面总设置cookie
+		router.post('/loginAction', (req, res, next) => {
+			let { username, password } = req.body; // 获取用户名和密码
+			password = md5(password); // 对管理员密码加密
+			sql.find('sh1811', 'admin', { username, password }).then(data => { // 查询数据
+				if (data.length === 0) { // 没有该管理员信息
+					res.cookie('isLogin', 0); // 登录状态设为0
+					res.redirect('/login') // 继续在本登录页面
+				} else { // 管理员存在
+					res.cookie('isLogin', 1); // 登录状态设为1
+					res.redirect('/') // 进入系统的首页
+				}
+			})
+		})
+5、每一个路由都需要判断管理员的登录状态
+	以users.js为例  ----  用户管理为例
+	router.get('/', (req, res, next) => {
+		if (!req.cookies.isLogin || req.cookies.isLogin == 0) { // 表示未登录
+			res.redirect('/login'); // 跳转到登录页面
+			return; // 代码将不再继续往下执行
+		}
+		....
+	})
+	这样能够确保当用户访问 /users的路由时，如果未登录可以直接跳转到登录页面，
+	但是，如果路由形如/users/search这种事，就监管不到了
+
+	app.js文件中添加如下代码
+	app.all('/users/*', (req, res, next) => { // 所有访问/users/*的路由
+		if (req.cookies.isLogin == 1) { // 如果用户是登录状态
+			next() // 继续执行即可
+		} else { // 如果是未登录装填
+			res.redirect('/login') // 跳转到登录页面
+		}
+	})
+	同样的，在 index.js product.js cart.js的第一个路由/处要添加如下代码
+		if (!req.cookies.isLogin || req.cookies.isLogin == 0) { // 表示未登录
+			res.redirect('/login'); // 跳转到登录页面
+			return; // 代码将不再继续往下执行
+		}
+	同理，在app.js中添加相关的代码 /product/*  /cart/*  
+	app.all('/product/*', (req, res, next) => {
+		if (req.cookies.isLogin == 1) {
+			next()
+		} else {
+			res.redirect('/login')
+		}
+	})
+	app.all('/cart/*', (req, res, next) => {
+		if (req.cookies.isLogin == 1) {
+			next()
+		} else {
+			res.redirect('/login')
+		}
+	})
+
+	有登录就一定要有退出 header.ejs找到sign out
+	<a href="/logout" class="btn btn-default btn-flat">Sign out</a>
+	index.js实现路由 /logout
+
+	router.get('/logout', (req, res, next) => {
+		// res.cookie('isLogin', 0); // 覆盖
+		res.clearCookie('isLogin') // 删除cookie
+		res.redirect('/login')
+	})
+
+	我们使用的是cookie完成登录和退出
+	实际上还有别的方式 session ,放在内存中的
+	https://www.cnblogs.com/mingjiatang/p/7495321.html
+	cnpm i express-session -D
+	备份app.1.js ----- cookie实现
+	app.js 
+		var session = require('express-session');
+
+		// 使用 session 中间件
+		app.use(session({
+			secret :  'secret', // 对session id 相关的cookie 进行签名
+			resave : true,
+			saveUninitialized: false, // 是否保存未初始化的会话
+			cookie : {
+					maxAge : 1000 * 60 * 3, // 设置 session 的有效时间，单位毫秒
+			},
+		}));
+	备份了routes下的文件
+	index.js/users.js/cart.js/product.js中登录的状态，用的是session
+	if (req.session.isLogin != 1) { // 表示未登录
+    res.redirect('/login'); // 跳转到登录页面
+    return; // 代码将不再继续往下执行
+  }
+	app.js中登录的状态，用的是session
+	app.all('/users/*', (req, res, next) => {
+		if (req.session.isLogin == 1) {
+			next()
+		} else {
+			res.redirect('/login')
+		}
+	})
+	app.all('/product/*', (req, res, next) => {
+		if (req.session.isLogin == 1) {
+			next()
+		} else {
+			res.redirect('/login')
+		}
+	})
+	app.all('/cart/*', (req, res, next) => {
+		if (req.session.isLogin == 1) {
+			next()
+		} else {
+			res.redirect('/login')
+		}
+	})
+
+	貌似session比cookie安全一点，但是也就那样
+	其实还有一种技术，就是token验证登录状态
+	https://www.cnblogs.com/hlere/p/6668159.html?utm_source=itdadao&utm_medium=referral
+	基于Token的身份验证方法
+		客户端使用用户名和密码请求登录
+		服务端收到请求，验证登录是否成功
+		验证成功后，服务端会返回一个Token给客户端，反之，返回身份验证失败的信息
+		客户端收到Token后把Token用一种方式(cookie/localstorage/sessionstorage/其他)存储起来
+		客户端每次发起请求时都选哦将Token发给服务端
+		服务端收到请求后，验证Token的合法性，合法就返回客户端所需数据，反之，返回验证失败的信息
+
